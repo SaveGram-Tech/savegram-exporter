@@ -1,0 +1,17 @@
+.venv*/
+__pycache__/
+.tmp*/
+*.pyc
+*.egg-info/
+build/
+dist/
+release/
+*.session*
+*.dpapi
+*.log
+.env*
+*.tgex*
+SOURCE.json
+.private/
+telegram-api.json
+_savegram_build_config.py
