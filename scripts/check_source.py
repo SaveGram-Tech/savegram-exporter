@@ -28,7 +28,8 @@ TELEGRAM_REQUESTS = {
     "messages.GetHistoryRequest", "messages.GetForumTopicsRequest", "messages.GetFullChatRequest",
     "channels.GetFullChannelRequest", "users.GetFullUserRequest", "users.GetUsersRequest",
     "messages.GetMessageReactionsListRequest", "messages.GetPollVotesRequest",
-    "messages.GetCustomEmojiDocumentsRequest", "upload.GetFileRequest", "upload.GetCdnFileRequest",
+    "messages.GetCustomEmojiDocumentsRequest", "messages.GetStickerSetRequest",
+    "upload.GetFileRequest", "upload.GetCdnFileRequest",
 }
 # Every Telethon client method telegram.py calls: signing in and out, the connection, and reading
 # chats, messages and profiles and downloading their files.

@@ -101,6 +101,17 @@ TEXT = {
         "To read history twice as fast, press “Allow” in Telegram's “Data export request” message on your phone.",
         "Чтобы история читалась вдвое быстрее, нажмите «Allow» в сообщении Telegram «Data export request» на телефоне.",
         "Para leer el historial el doble de rápido, pulsa «Allow» en el mensaje «Data export request» de Telegram en tu teléfono."),
+    # The fast mode is not for this chat: through it Telegram gives only the account's own messages of a
+    # chat with copy protection. The badge shows the fast mode crossed out, and both of these name the
+    # protection as the reason.
+    "takeout_protected": (
+        "Copy protection is on in this chat, so the fast mode is not used for it: the export runs at the usual speed and saves every message.",
+        "В этом чате включена защита от копирования, поэтому быстрый режим для него не используется: выгрузка идёт на обычной скорости и сохраняет все сообщения.",
+        "Este chat tiene activada la protección contra copia, así que el modo rápido no se usa con él: la exportación va a velocidad normal y guarda todos los mensajes."),
+    "takeout_filtered": (
+        "In the fast mode Telegram gives only your own messages from this chat, as it does in chats with copy protection. The export runs at the usual speed and saves every message.",
+        "В быстром режиме Telegram отдаёт из этого чата только ваши сообщения — так бывает в чатах с защитой от копирования. Выгрузка идёт на обычной скорости и сохраняет все сообщения.",
+        "En el modo rápido Telegram solo entrega tus propios mensajes de este chat, como ocurre en los chats con protección contra copia. La exportación va a velocidad normal y guarda todos los mensajes."),
     "takeout_later": (
         "The next export can be faster: press “Allow” in Telegram's “Data export request” message on your phone.",
         "Следующая выгрузка может быть быстрее: нажмите «Allow» («Разрешить») в сообщении Telegram «Data export request» на телефоне.",

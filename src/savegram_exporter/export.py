@@ -181,6 +181,39 @@ def named_people(data):
     return [person for person in people if isinstance(person, int)]
 
 
+DICE_FILES = "media/emojis/dice_"
+
+
+def dice_file(emoticon, index, suffix):
+    """Where one sticker of a dice emoji's set is kept: named by the emoji's code points and the
+    sticker's place in the set, so a file says by its name alone what it is."""
+    return f"{DICE_FILES}{'-'.join(f'{ord(char):x}' for char in emoticon)}_{index:02d}{suffix}"
+
+
+def dice_place(name):
+    """The emoji and the place in its set that a dice_file() name stands for, or None."""
+    code, _, index = name.removeprefix(DICE_FILES).rpartition(".")[0].partition("_")
+    try:
+        if name.startswith(DICE_FILES) and index.isdigit() and len(index) == 2:
+            return "".join(chr(int(part, 16)) for part in code.split("-")), int(index)
+    except (ValueError, OverflowError):
+        pass
+    return None
+
+
+def dice_sets(names):
+    """The saved dice stickers as the archive lists them: for each emoji its set in order, each
+    sticker by its file; a sticker Telegram did not give leaves its place empty."""
+    sets = {}
+    for name in names:
+        if place := dice_place(name):
+            emoticon, index = place
+            stickers = sets.setdefault(emoticon, [])
+            stickers.extend({} for _ in range(index + 1 - len(stickers)))
+            stickers[index] = {"downloaded_path": name}
+    return dict(sorted(sets.items()))
+
+
 def linked_people(data):
     """IDs of the people a saved message links to by name, in its text, its rich text or its media."""
     return [entity["user_id"] for entity in data.get("entities") or ()
@@ -733,6 +766,13 @@ class Collector:
             if document is None:
                 return None
             return lambda handle: telegram.download(document, handle)
+        if kind == "dice":
+            # The file's name says which sticker of which set it is; the set is asked for again.
+            emoticon, index = dice_place(record["path"])
+            documents = await telegram.dice_stickers(emoticon)
+            if index >= len(documents):
+                return None
+            return lambda handle: telegram.download(documents[index], handle)
         if kind == "chat_avatar":
             entity = await telegram.entity(peer)
         elif kind == "chat_photo":
@@ -892,6 +932,24 @@ class Collector:
                 self.emojis[doc_id] = path
                 self.dirty_emojis.add(doc_id)
         attach_emoji_paths(data, self.emojis)
+
+    async def dice_stickers(self, emoticons):
+        """Save the stickers Telegram's apps draw a rolled die, a dart, a ball or a slot machine with.
+
+        A dice message holds only its emoji and the number it landed on. The picture of that number
+        is a sticker of a set Telegram keeps for the emoji, the same for everyone; a slot machine is
+        put together from several. The whole set is saved, in its order, for each such emoji the
+        chat's messages hold, and whoever reads the archive picks from it.
+        """
+        if self.options.media_mode == "none":
+            return
+        for emoticon in emoticons:
+            documents = await self.optional("emoji_unavailable", lambda: self.telegram.dice_stickers(emoticon))
+            for index, document in enumerate(documents or ()):
+                await self.file(dice_file(emoticon, index, extension(document)),
+                                lambda handle, document=document: self.telegram.download(document, handle),
+                                dict(kind="dice", document_id=document.id), getattr(document, "dc_id", None))
+        self.save()
 
     async def user(self, entity, via="entity", message_id=None):
         # `via` records where this profile was seen, so its avatar can be found again later.
@@ -1294,13 +1352,18 @@ class Collector:
     async def collect(self):
         if self.privacy:
             self.privacy.unsupported = self.state.get("privacy_unsupported", 0)
+        entity = await self.telegram.entity(self.options.peer)
+        # Of a chat that forbids copying, a takeout session gives only the account's own messages:
+        # it is read at the usual speed from its first request, and Telegram is asked for no session.
+        decline = getattr(self.telegram, "decline_takeout", None)
+        if decline and getattr(entity, "noforwards", False):
+            decline("protected")
         self.report("resuming" if self.message_ids else "bounds")
         if "first_id" not in self.state:
             bounds = await self.telegram.message_bounds(self.options.peer, self.options.start, self.options.end)
             first, last = bounds or (None, None)
             self.save(first_id=first, last_id=last, offset=(last + 1 if last is not None else 0),
                       history_done=bounds is None)
-        entity = await self.telegram.entity(self.options.peer)
         self.private_peer = entity if isinstance(entity, types.User) else None
         self.own_id = None if self.private_peer else entity.id
         basic = entity_data(entity)
@@ -1407,9 +1470,15 @@ class Collector:
         self.save(participants_done=True)
         # Messages mention profiles that may no longer be reachable: never fatal, and
         # resolved in batches so tens of thousands of IDs do not become one request each.
-        named, span = set(), []
+        named, span, rolled = set(), [], set()
         for data in self.stored_messages():
             named |= referenced_users(data)
+            media = data.get("media")
+            if isinstance(media, dict) and media.get("_") == "MessageMediaDice":
+                emoticon = media.get("emoticon")
+                # A dice emoji is one symbol; anything longer is not a name for a file.
+                if isinstance(emoticon, str) and 0 < len(emoticon) <= 4:
+                    rolled.add(emoticon)
             if data.get("date"):
                 moment = datetime.fromisoformat(data["date"])
                 span = [min(span[0], moment), max(span[1], moment)] if span else [moment, moment]
@@ -1441,6 +1510,7 @@ class Collector:
             self.save()
             self.report()
         await self.whole_profiles()
+        await self.dice_stickers(sorted(rolled))
         await self.final_retries()
         if self.state.get("emoji_recovered"):
             # Messages get theirs as they are written: export_messages.
@@ -1466,6 +1536,8 @@ class Collector:
                 settings.update(start_date=span[0].astimezone(timezone.utc).isoformat(),
                                 end_date=span[1].astimezone(timezone.utc).isoformat())
         exported_at = datetime.now(timezone.utc).isoformat()
+        # Read from the files themselves, so every saved sticker is listed whatever run saved it.
+        info = dict(info, dice_stickers=dice_sets(self.manifest))
         # Everything but the messages, which are written after it from the checkpoint.
         payload = dict(dialog_info=info, related_entities={"users": self.users, "chats": self.chats},
                        export_date=exported_at, export_settings=settings, omissions=dict(omissions),
@@ -1604,7 +1676,7 @@ async def _job(telegram, options, progress, cancel, buffered=None, floods=None):
         return ExportResult(directory, tuple(target / file.name for target, files in produced for file in files),
                             len(collector.message_ids), collector.final_omissions, flood_waits(),
                             collector.warnings + (("takeout_later",) if getattr(telegram, "takeout_delayed", False)
-                                                  else ()))
+                                                  and not getattr(telegram, "takeout_unfit", None) else ()))
     finally:
         if retries:
             retries.record = old_record
@@ -1646,6 +1718,9 @@ async def export(telegram, options: ExportOptions, progress, cancel: Event) -> E
         if not (value.history_read or value.history_done):
             if getattr(telegram, "takeout_active", False):
                 value = replace(value, notes=("takeout_on",))
+            elif getattr(telegram, "takeout_unfit", None):
+                # Not for this chat, whatever Telegram allows: "takeout_protected", "takeout_filtered".
+                value = replace(value, notes=("takeout_" + telegram.takeout_unfit,))
             elif getattr(telegram, "takeout_delayed", False):
                 value = replace(value, notes=("takeout_delayed",))
         if counted:

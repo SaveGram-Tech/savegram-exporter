@@ -82,6 +82,8 @@ _timeouts = ContextVar("export_timeouts", default=())
 _file_download = ContextVar("file_download", default=None)
 # Collects the profiles a response carries while a history page is read.
 _page_users = ContextVar("page_users", default=None)
+# Set while one message is asked for through a takeout session to learn whether it gives this chat whole.
+_takeout_trial = ContextVar("takeout_trial", default=False)
 
 
 class FileUnavailable(Exception):
@@ -363,6 +365,9 @@ class Telegram:
             self._takeout_next, self._takeout_allowed = -math.inf, False
             # Until when Telegram's FloodWait on an ask holds the next one: asked before an export too.
             self._takeout_hold = -math.inf
+            # Whether the session gave a message of this export's chat that someone else wrote, and why
+            # the chat is read without it: see _try_takeout.
+            self._takeout_proven, self._takeout_unfit = False, None
 
     def rate_limited(self):
         """True while a server cooldown is still running for every export request."""
@@ -646,7 +651,7 @@ class Telegram:
 
     async def dialogs(self):
         """Every chat as (name, peer, details): its kind, username and ID, for a label a person can read;
-        the key chat_photo() knows it by, and whether it has a photo.
+        the key chat_photo() knows it by, whether it has a photo, and whether it forbids copying.
 
         A deleted account has no name left, and Saved Messages bears the account's own. Saved Messages
         is the account as a user: Telethon's InputPeerSelf has no ID, and a checkpoint is named by it.
@@ -670,7 +675,8 @@ class Telegram:
             if photo:
                 self._chat_entities[key] = entity
             result.append((item.name, peer, dict(kind=kind, username=getattr(entity, "username", None) or "",
-                                                 id=entity.id, key=key, photo=photo)))
+                                                 id=entity.id, key=key, photo=photo,
+                                                 protected=bool(getattr(entity, "noforwards", False)))))
 
     async def chat_photo(self, key):
         """A chat's small photo for the chat list, as bytes, or None: for the window only, never retried.
@@ -762,10 +768,12 @@ class Telegram:
         """Let this export read history pages through a takeout session: TAKEOUT_HISTORY_INTERVAL.
 
         Telegram may first ask the person to allow one, in a message to their Telegram: the export
-        reads at the usual pace meanwhile and asks again every TAKEOUT_ASK_SECONDS.
+        reads at the usual pace meanwhile and asks again every TAKEOUT_ASK_SECONDS. Whether the session
+        gives this export's chat whole is not known yet: _try_takeout.
         """
         self._runtime()
         self._takeout_wanted = True
+        self._takeout_proven, self._takeout_unfit = False, None
         if not self.takeout_delayed:
             self._takeout_next = -math.inf  # At this export's first page, unless Telegram is waiting.
 
@@ -785,7 +793,19 @@ class Telegram:
     def takeout_active(self):
         """History pages go through a takeout session now: the fast mode, at TAKEOUT_HISTORY_INTERVAL."""
         self._runtime()
-        return self._takeout_id is not None
+        return self._takeout_id is not None and self._takeout_proven and not self._takeout_unfit
+
+    @property
+    def takeout_unfit(self):
+        """Why this export's chat is read at the usual speed whatever Telegram allows: "protected" (the
+        chat forbids copying), "filtered" (the session gave only the account's own messages), or None."""
+        self._runtime()
+        return self._takeout_unfit
+
+    def decline_takeout(self, reason):
+        """Read this export's chat without a takeout session to its end, and ask Telegram for none."""
+        self._runtime()
+        self._takeout_unfit, self._takeout_wanted = reason, False
 
     async def ask_takeout(self):
         """Ask for a takeout session before an export, while the window says what Telegram's "Data export
@@ -801,8 +821,11 @@ class Telegram:
         return "delayed" if self.takeout_delayed else "unavailable"
 
     def takeout_for(self, request):
-        """The takeout session a request goes through, or None. History pages only."""
-        return self._takeout_id if isinstance(request, functions.messages.GetHistoryRequest) else None
+        """The takeout session a request goes through, or None. History pages only, and only of a chat
+        the session is known to give whole."""
+        if not isinstance(request, functions.messages.GetHistoryRequest) or self._takeout_unfit:
+            return None
+        return self._takeout_id if self._takeout_proven or _takeout_trial.get() else None
 
     def takeout_refused(self, error):
         """A request was refused inside the takeout session and answered outside it: this export
@@ -863,9 +886,11 @@ class Telegram:
         try:
             page = await self._read(lambda: self._client.get_messages(
                 peer, limit=100, offset_id=offset_id, min_id=min_id),
-                kind="history" if self._takeout_id is None else "takeout")
+                kind="takeout" if self.takeout_active else "history")
         finally:
             _page_users.reset(token)
+        if self._takeout_id is not None and not self._takeout_proven and not self._takeout_unfit:
+            await self._try_takeout(peer, page)
         if not hasattr(self, "_known_users"):
             self._known_users, self._partial_users = {}, {}
         # The page also carries the people of its messages' recent reactions and polls' latest voters.
@@ -881,6 +906,31 @@ class Telegram:
             if isinstance(sender, types.User):
                 self._known_users[sender.id] = sender
         return page
+
+    async def _try_takeout(self, peer, page):
+        """Learn whether the takeout session gives this chat whole, from a page read without it.
+
+        Of a chat that forbids copying Telegram gives through the session only the account's own
+        messages, as if there were no others, and no error says so. The first message someone else
+        wrote is therefore asked for through the session too: if it comes, the pages that follow go
+        through it; if not, the whole chat is read as before. A page of the account's own messages
+        tells nothing, and the next one is read without the session as well.
+        """
+        other = next((message for message in page if not message.out), None)
+        if other is None:
+            return
+        token = _takeout_trial.set(True)
+        try:
+            same = await self._read(lambda: self._client.get_messages(peer, limit=1, offset_id=other.id + 1),
+                                    kind="takeout")
+        finally:
+            _takeout_trial.reset(token)
+        if self._takeout_id is None:
+            return  # The session ended meanwhile and the message came outside it: takeout_refused.
+        if same and same[0].id == other.id:
+            self._takeout_proven = True
+        else:
+            self.decline_takeout("filtered")
 
     def known_user(self, user_id):
         """A complete profile a history page already brought, or None."""
@@ -952,6 +1002,13 @@ class Telegram:
                 functions.messages.GetCustomEmojiDocumentsRequest(ids[offset:offset + 100])))
             result.update((doc.id, doc) for doc in documents)
         return result
+
+    async def dice_stickers(self, emoticon):
+        """The stickers Telegram keeps for a dice emoji, in the order of their set: what its apps draw
+        a rolled die, a dart, a ball or a slot machine with. The same for every account."""
+        found = await self._read(lambda: self._client(functions.messages.GetStickerSetRequest(
+            types.InputStickerSetDice(emoticon), hash=0)))
+        return list(getattr(found, "documents", None) or [])
 
     async def download(self, media, handle, message=None):
         # A caller-opened handle prevents Telegram filenames controlling paths.

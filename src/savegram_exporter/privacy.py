@@ -304,6 +304,11 @@ class Privacy:
                 "chat_photos": [] if is_user and not self.keep_avatars else [
                     scalars(p, ("downloaded_path",)) for p in info["chat_photos"]
                     if p.get("downloaded_path")],
+                # The stickers Telegram draws dice with: the same sets for every account.
+                "dice_stickers": {
+                    emoticon: [scalars(sticker, ("downloaded_path",)) for sticker in stickers]
+                    for emoticon, stickers in sorted((info.get("dice_stickers") or {}).items())
+                    if isinstance(emoticon, str) and isinstance(stickers, list)},
             },
             "related_entities": {
                 "users": {k: self.person(v) for k, v in sorted(value["related_entities"]["users"].items())},

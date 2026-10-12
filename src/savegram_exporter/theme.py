@@ -95,6 +95,7 @@ QLabel#progressText { color: %(secondary)s; font-size: 9pt; }
 QLabel#modeBadge { border-radius: 10px; padding: 2px 10px; font-size: 9pt; font-weight: 600; }
 QLabel#modeBadge[mode="fast"] { background: %(accent_soft)s; color: %(accent)s; }
 QLabel#modeBadge[mode="usual"] { background: %(page)s; color: %(secondary)s; }
+QLabel#modeBadge[mode="off"] { background: %(page)s; color: %(secondary)s; text-decoration: line-through; }
 QLabel#qr { background: white; border: 1px solid %(border)s; border-radius: 14px; padding: 10px; }
 
 QPushButton { border: none; border-radius: 10px; padding: 8px 16px; background: %(accent_soft)s; color: %(accent)s;

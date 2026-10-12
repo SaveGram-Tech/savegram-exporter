@@ -259,6 +259,8 @@ class Window(QMainWindow):
         self.twofa_label = self.add_label(auth, "twofa")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        # Enter in the field confirms the password, as its button does.
+        self.password.returnPressed.connect(self.submit_password)
         auth.addWidget(self.with_help(self.password, "twofa"))
         self.password_button = self.button(auth, "submit", self.submit_password)
         self.show_password(False)
@@ -322,6 +324,8 @@ class Window(QMainWindow):
         self.chats.lineEdit().editingFinished.connect(self.settle_chat_text)
         self.translated.append((self.chats.lineEdit().setPlaceholderText, "chat_search"))
         self.chat_items = []
+        # The chats that forbid copying, by their keys: the fast mode is not asked for them.
+        self.protected_chats = set()
         # The list loads by itself after signing in; its button, beside it, loads it again.
         chat = QHBoxLayout()
         chat.setSpacing(8)
@@ -433,7 +437,8 @@ class Window(QMainWindow):
         self.progress_text.hide()
         progress.addWidget(self.progress_text, 1)
         # Which speed history is read at while it is: the fast mode, or the usual speed while Telegram
-        # waits for "Allow". It turns blue the moment Telegram allows it.
+        # waits for "Allow". It turns blue the moment Telegram allows it, and is crossed out for a chat
+        # the fast mode would not give whole.
         self.mode_badge = QLabel()
         self.mode_badge.setObjectName("modeBadge")
         self.mode_badge.hide()
@@ -668,9 +673,10 @@ class Window(QMainWindow):
         """Ask Telegram for the fast mode before the export. A sign-in Telegram knows gets it at once. After a
         new one Telegram first sends the person a "Data export request": the window shows it as it arrives,
         with what it is, and starts the export in the fast mode the moment the person presses "Allow", or
-        at once at the usual speed."""
+        at once at the usual speed. A chat that forbids copying is not read in the fast mode, so nothing is
+        asked for it."""
         ask = getattr(self.account.telegram, "ask_takeout", None)
-        if ask is None:
+        if ask is None or self.chats.currentData(CHAT_KEY) in self.protected_chats:
             return
         self.status.setText(self.t("takeout_checking"))
         if await ask() != "delayed":
@@ -712,9 +718,10 @@ class Window(QMainWindow):
         return " · ".join(parts)
 
     def show_mode(self, mode):
-        """The speed history is read at: "fast", "usual" (Telegram waits for "Allow") or None, unsaid."""
+        """The speed history is read at: "fast", "usual" (Telegram waits for "Allow"), "off" (the fast mode
+        crossed out: not for this chat) or None, unsaid."""
         if mode:
-            self.mode_badge.setText(self.t("mode_" + mode))
+            self.mode_badge.setText(self.t("mode_" + ("fast" if mode == "off" else mode)))
             if self.mode_badge.property("mode") != mode:
                 self.mode_badge.setProperty("mode", mode)
                 self.mode_badge.style().unpolish(self.mode_badge)
@@ -884,6 +891,8 @@ class Window(QMainWindow):
         self.chat_faces = {details["key"]: (details.get("kind", "user"), name.strip() or details.get("username", ""),
                                             details.get("id", 0), bool(details.get("photo")))
                            for name, _, details in self.chat_items if details.get("key") is not None}
+        self.protected_chats = {details["key"] for _, _, details in self.chat_items
+                                if details.get("protected") and details.get("key") is not None}
         self.fill_chats()
         # The rows the list opens with: their photos are there by the time it is.
         for _, _, details in self.chat_items[:self.chats.maxVisibleItems()]:
@@ -957,6 +966,7 @@ class Window(QMainWindow):
     async def logout(self):
         await self.chat_photos.stop()
         self.chat_faces, self.chat_photo_images, self.chat_pictures = {}, {}, {}
+        self.protected_chats = set()
         try:
             confirmed = await self.account.close(forget=True)
         except BaseException:
@@ -1002,6 +1012,7 @@ class Window(QMainWindow):
         phase = self.t(key, seconds=progress.wait_seconds,
                        attempt=progress.retry_attempt, category=progress.error_category)
         self.show_mode("fast" if "takeout_on" in progress.notes else
+                       "off" if {"takeout_protected", "takeout_filtered"} & set(progress.notes) else
                        "usual" if "takeout_delayed" in progress.notes else None)
         lines = [self.t("progress", phase=phase, messages=progress.messages, skipped=progress.skipped)]
         if progress.download_speed is not None:
