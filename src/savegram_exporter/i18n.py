@@ -69,6 +69,10 @@ TEXT = {
         "Un chat privado lleva el nombre de la otra persona y Mensajes guardados el tuyo, así que este archivo sigue mostrando quién lo exportó."),
     "keep_names": ("Keep people's names", "Оставить имена людей", "Conservar los nombres"),
     "keep_avatars": ("Keep profile photos", "Оставить фото профилей", "Conservar las fotos de perfil"),
+    "no_messages": (
+        "Telegram gave no messages of this chat for the chosen dates, so the archive has none. Check the dates and export again.",
+        "Telegram не отдал ни одного сообщения этого чата за выбранные даты, поэтому архив без сообщений. Проверьте даты и выгрузите ещё раз.",
+        "Telegram no entregó ningún mensaje de este chat en las fechas elegidas, así que el archivo no tiene mensajes. Revisa las fechas y exporta de nuevo."),
     "hidden_history": (
         "This group hides earlier history from new members: the archive begins where your account joined, so it shows when that was.",
         "Эта группа скрывает прежнюю историю от новых участников: архив начинается с момента, когда вступил ваш аккаунт, и выдаёт эту дату.",

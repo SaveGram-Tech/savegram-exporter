@@ -1554,7 +1554,8 @@ class Collector:
             header["title"] = payload["dialog_info"]["title"]
             self.manifest.sort()
         self.final_omissions = dict(omissions)
-        self.warnings = ("hidden_history",) if self.state.get("hidden_history") else ()
+        self.warnings = (("hidden_history",) if self.state.get("hidden_history") else ()) + (
+            ("no_messages",) if not self.message_ids else ())
         return header, payload
 
 

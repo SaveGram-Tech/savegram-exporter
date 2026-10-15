@@ -31,6 +31,10 @@ PART_SIZE_KB = 512
 # Seconds between history pages of 100: slow enough that Telegram does not ask the export to
 # wait. A FloodWait holds every other request of the export too.
 HISTORY_INTERVAL = 1.2
+# Messages asked for at each end of the history to find its first and last one. Telegram may put a
+# deleted message (MessageEmpty) there, which Telethon drops: asked for one, the export would get none
+# and take the chat for empty.
+BOUND_MESSAGES = 20
 # Seconds between history pages read through a takeout session, Telegram's own way to export an
 # account's data, which serves pages faster.
 TAKEOUT_HISTORY_INTERVAL = 0.6
@@ -757,9 +761,9 @@ class Telegram:
         before_start = start.replace(microsecond=0) - timedelta(seconds=int(start.microsecond == 0))
         after_end = end.replace(microsecond=0) + timedelta(seconds=1)
         first = await self._read(lambda: self._client.get_messages(
-            peer, limit=1, offset_date=before_start, reverse=True), kind="history")
+            peer, limit=BOUND_MESSAGES, offset_date=before_start, reverse=True), kind="history")
         last = await self._read(lambda: self._client.get_messages(
-            peer, limit=1, offset_date=after_end), kind="history")
+            peer, limit=BOUND_MESSAGES, offset_date=after_end), kind="history")
         if not first or not last or not (start <= first[0].date <= end and start <= last[0].date <= end):
             return None
         return first[0].id, last[0].id
